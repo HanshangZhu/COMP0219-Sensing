@@ -14,19 +14,29 @@ except ImportError:
     HAS_PI_CAMERA = False
 
 class PendulumAngleEstimatorPi:
-    def __init__(self, output_mode='speed', calibration_constant=1.0):
+    def __init__(self, output_mode='speed', calibration_constant=1.0, fast_motion=False):
         """
         Initialize the pendulum angle estimator.
         
         Args:
             output_mode: 'angle' to print angle, 'speed' to print wind speed (default)
             calibration_constant: C value for wind speed calculation V = C * sqrt(tan(angle))
+            fast_motion: Enable optimizations for fast-moving objects (default: False)
         """
+        # Store fast motion mode
+        self.fast_motion = fast_motion
+        
         # Initialize Camera
         if HAS_PI_CAMERA:
             self.picam2 = Picamera2()
             # Configure for 640x480 @ 30fps for good performance
             config = self.picam2.create_preview_configuration(main={"format": "RGB888", "size": (640, 480)})
+            
+            # For fast motion: reduce exposure time to minimize blur
+            if fast_motion:
+                config["controls"] = {"ExposureTime": 5000, "AnalogueGain": 2.0}  # 5ms exposure
+                print("Fast motion mode enabled: reduced exposure time")
+            
             self.picam2.configure(config)
             self.picam2.start()
             print("PiCamera2 started.")
@@ -34,13 +44,36 @@ class PendulumAngleEstimatorPi:
             self.cap = cv2.VideoCapture(0)
             if not self.cap.isOpened():
                 raise ValueError("Could not open webcam.")
+            
+            # For fast motion: set higher FPS if possible
+            if fast_motion:
+                self.cap.set(cv2.CAP_PROP_FPS, 60)
 
         # Default color range (Green-ish) - can be changed by clicking
         # Default Target: [100, 104, 149]
-        # Range:  +/- 20 Hue, +/- 60 Sat/Val
+        # For fast motion: wider tolerance to handle blur and lighting changes
+        if fast_motion:
+            self.hue_tolerance = 30      # ±30 instead of ±20
+            self.sat_tolerance = 80      # ±80 instead of ±60
+            self.val_tolerance = 80      # ±80 instead of ±60
+            self.min_area = 20           # Lower threshold (was 50)
+            self.erode_iterations = 0    # Skip erosion to preserve blurred objects
+            self.dilate_iterations = 1   # Minimal dilation
+        else:
+            self.hue_tolerance = 20
+            self.sat_tolerance = 60
+            self.val_tolerance = 60
+            self.min_area = 50
+            self.erode_iterations = 1
+            self.dilate_iterations = 2
+        
         h, s, v = 100, 104, 149
-        self.lower_color = np.array([max(0, h-20), max(30, s-60), max(30, v-60)], dtype=np.uint8)
-        self.upper_color = np.array([min(179, h+20), min(255, s+60), min(255, v+60)], dtype=np.uint8)
+        self.lower_color = np.array([max(0, h-self.hue_tolerance), 
+                                     max(30, s-self.sat_tolerance), 
+                                     max(30, v-self.val_tolerance)], dtype=np.uint8)
+        self.upper_color = np.array([min(179, h+self.hue_tolerance), 
+                                     min(255, s+self.sat_tolerance), 
+                                     min(255, v+self.val_tolerance)], dtype=np.uint8)
         
         print(f"Default Tracking Color: HSV[{h}, {s}, {v}]")
         print(f"Default Range: {self.lower_color} to {self.upper_color}")
@@ -75,10 +108,14 @@ class PendulumAngleEstimatorPi:
                 pixel = hsv[y, x]
                 h, s, v = int(pixel[0]), int(pixel[1]), int(pixel[2])  # Explicitly convert to int
                 
-                # Create a wide range to catch both pins (±20 Hue, ±60 Sat/Val)
+                # Create a range using current tolerance settings
                 # Explicitly cast to uint8 to match OpenCV's expected type
-                self.lower_color = np.array([max(0, h-20), max(30, s-60), max(30, v-60)], dtype=np.uint8)
-                self.upper_color = np.array([min(179, h+20), min(255, s+60), min(255, v+60)], dtype=np.uint8)
+                self.lower_color = np.array([max(0, h-self.hue_tolerance), 
+                                            max(30, s-self.sat_tolerance), 
+                                            max(30, v-self.val_tolerance)], dtype=np.uint8)
+                self.upper_color = np.array([min(179, h+self.hue_tolerance), 
+                                            min(255, s+self.sat_tolerance), 
+                                            min(255, v+self.val_tolerance)], dtype=np.uint8)
                 
                 # Print the selected color for debugging
                 print(f"Color picked at ({x}, {y}): HSV[{h}, {s}, {v}]")
@@ -135,6 +172,8 @@ class PendulumAngleEstimatorPi:
         print(f"Output Mode: {'ANGLE' if self.output_mode == 'angle' else 'WIND SPEED'}")
         if self.output_mode == 'speed':
             print(f"Calibration Constant C: {self.calibration_constant}")
+        if self.fast_motion:
+            print(f"Fast Motion Mode: ON (Hue±{self.hue_tolerance}, MinArea={self.min_area})")
         print()
         
         while True:
@@ -147,10 +186,12 @@ class PendulumAngleEstimatorPi:
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
             mask = cv2.inRange(hsv, self.lower_color, self.upper_color)
             
-            # Clean noise
+            # Clean noise (adjust based on fast_motion mode)
             kernel = np.ones((3,3), np.uint8)
-            mask = cv2.erode(mask, kernel, iterations=1)
-            mask = cv2.dilate(mask, kernel, iterations=2)
+            if self.erode_iterations > 0:
+                mask = cv2.erode(mask, kernel, iterations=self.erode_iterations)
+            if self.dilate_iterations > 0:
+                mask = cv2.dilate(mask, kernel, iterations=self.dilate_iterations)
             
             # Find ALL contours
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -163,7 +204,7 @@ class PendulumAngleEstimatorPi:
             points = []
             if len(blobs) >= 2:
                 for c in blobs:
-                    if cv2.contourArea(c) < 50: continue
+                    if cv2.contourArea(c) < self.min_area: continue  # Use dynamic threshold
                     
                     M = cv2.moments(c)
                     if M["m00"] != 0:
@@ -234,6 +275,8 @@ if __name__ == "__main__":
                        help='Output angle instead of wind speed (format: angle:xx.x)')
     parser.add_argument('-C', '--calibration', type=float, default=1.0,
                        help='Calibration constant C for wind speed formula V = C * sqrt(tan(angle)) (default: 1.0)')
+    parser.add_argument('--fast', action='store_true',
+                       help='Enable fast motion mode (wider color tolerance, reduced blur, lower thresholds)')
     
     args = parser.parse_args()
     
@@ -242,6 +285,7 @@ if __name__ == "__main__":
     
     # Create and run the estimator
     estimator = PendulumAngleEstimatorPi(output_mode=output_mode, 
-                                         calibration_constant=args.calibration)
+                                         calibration_constant=args.calibration,
+                                         fast_motion=args.fast)
     estimator.run()
 
