@@ -3,6 +3,7 @@ import numpy as np
 import time
 import argparse
 import math
+import serial
 
 # --- RASPBERRY PI CAMERA SETUP ---
 try:
@@ -14,7 +15,8 @@ except ImportError:
     HAS_PI_CAMERA = False
 
 class PendulumAngleEstimatorPi:
-    def __init__(self, output_mode='speed', calibration_constant=1.0, fast_motion=False):
+    def __init__(self, output_mode='speed', calibration_constant=1.0, fast_motion=False, 
+                 serial_port=None, serial_baud=115200):
         """
         Initialize the pendulum angle estimator.
         
@@ -22,9 +24,27 @@ class PendulumAngleEstimatorPi:
             output_mode: 'angle' to print angle, 'speed' to print wind speed (default)
             calibration_constant: C value for wind speed calculation V = C * sqrt(tan(angle))
             fast_motion: Enable optimizations for fast-moving objects (default: False)
+            serial_port: Serial port for UART output (e.g., '/dev/ttyAMA0'), None to disable
+            serial_baud: Serial baud rate (default: 115200)
         """
         # Store fast motion mode
         self.fast_motion = fast_motion
+        
+        # Initialize Serial/UART (optional)
+        self.serial_port = None
+        if serial_port:
+            try:
+                self.serial_port = serial.Serial(
+                    port=serial_port,
+                    baudrate=serial_baud,
+                    timeout=1,
+                    write_timeout=2
+                )
+                print(f"Serial UART initialized: {serial_port} @ {serial_baud} baud")
+            except Exception as e:
+                print(f"Warning: Could not open serial port {serial_port}: {e}")
+                print("Continuing without serial output...")
+                self.serial_port = None
         
         # Initialize Camera
         if HAS_PI_CAMERA:
@@ -122,6 +142,26 @@ class PendulumAngleEstimatorPi:
             ret, frame = self.cap.read()
             return frame if ret else None
 
+    def send_serial(self, value):
+        """
+        Send data over serial UART port
+        
+        Args:
+            value: Float value to send (angle or wind speed)
+        """
+        if self.serial_port is None:
+            return
+        
+        try:
+            # Format message similar to CameraTest.py
+            message = f"{value:.1f}\r\n"
+            self.serial_port.write(message.encode("utf-8"))
+            self.serial_port.flush()  # Ensure all bytes are transmitted
+        except serial.SerialTimeoutException:
+            print("⚠️ Serial write timeout — the UART buffer may be full.")
+        except Exception as e:
+            print(f"Serial write error: {e}")
+    
     def calculate_wind_speed(self, angle_deg):
         """
         Calculate wind speed from pendulum angle using V = C * sqrt(tan(angle))
@@ -164,6 +204,10 @@ class PendulumAngleEstimatorPi:
             print(f"Calibration Constant C: {self.calibration_constant}")
         if self.fast_motion:
             print(f"Fast Motion Mode: ON (Hue±{self.hue_tolerance}, MinArea={self.min_area})")
+        if self.serial_port is not None:
+            print(f"Serial Output: ENABLED (Port: {self.serial_port.port}, Baud: {self.serial_port.baudrate})")
+        else:
+            print("Serial Output: DISABLED")
         print()
         
         while True:
@@ -230,11 +274,15 @@ class PendulumAngleEstimatorPi:
                         # Print angle in format: angle:xx.x
                         print(f"angle:{theta_smooth:.1f}")
                         display_text = f"Angle: {theta_smooth:.1f} deg"
+                        # Send angle over serial
+                        self.send_serial(theta_smooth)
                     else:
                         # Calculate and print wind speed (just the number)
                         wind_speed = self.calculate_wind_speed(theta_smooth)
                         print(f"{wind_speed:.1f}")
                         display_text = f"Speed: {wind_speed:.1f} m/s (Angle: {theta_smooth:.1f})"
+                        # Send wind speed over serial
+                        self.send_serial(wind_speed)
                     
                     # Display on screen
                     cv2.putText(display, display_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
@@ -256,17 +304,30 @@ class PendulumAngleEstimatorPi:
             self.picam2.stop()
         else:
             self.cap.release()
+        
+        # Close serial port if open
+        if self.serial_port is not None:
+            try:
+                self.serial_port.close()
+                print("\nSerial port closed.")
+            except Exception as e:
+                print(f"Error closing serial port: {e}")
+        
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description='Pendulum Angle Tracker with Wind Speed Estimation')
+    parser = argparse.ArgumentParser(description='Pendulum Angle Tracker with Wind Speed Estimation and UART Output')
     parser.add_argument('--angle', action='store_true', 
                        help='Output angle instead of wind speed (format: angle:xx.x)')
     parser.add_argument('-C', '--calibration', type=float, default=1.0,
                        help='Calibration constant C for wind speed formula V = C * sqrt(tan(angle)) (default: 1.0)')
     parser.add_argument('--fast', action='store_true',
                        help='Enable fast motion mode (wider color tolerance, reduced blur, lower thresholds)')
+    parser.add_argument('--serial', type=str, default=None,
+                       help='Serial port for UART output (e.g., /dev/ttyAMA0). Disabled by default.')
+    parser.add_argument('--baud', type=int, default=115200,
+                       help='Serial baud rate (default: 115200)')
     
     args = parser.parse_args()
     
@@ -276,6 +337,8 @@ if __name__ == "__main__":
     # Create and run the estimator
     estimator = PendulumAngleEstimatorPi(output_mode=output_mode, 
                                          calibration_constant=args.calibration,
-                                         fast_motion=args.fast)
+                                         fast_motion=args.fast,
+                                         serial_port=args.serial,
+                                         serial_baud=args.baud)
     estimator.run()
 
