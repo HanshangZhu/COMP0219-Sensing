@@ -26,22 +26,48 @@ class PendulumAngleEstimatorPi:
             if not self.cap.isOpened():
                 raise ValueError("Could not open webcam.")
 
-        # HARDCODED RANGE from User
-        # Target: [100, 104, 149]
+        # Default color range (Green-ish) - can be changed by clicking
+        # Default Target: [100, 104, 149]
         # Range:  +/- 20 Hue, +/- 60 Sat/Val
         h, s, v = 100, 104, 149
         self.lower_color = np.array([max(0, h-20), max(30, s-60), max(30, v-60)])
         self.upper_color = np.array([min(179, h+20), min(255, s+60), min(255, v+60)])
         
-        print(f"Tracking Color: HSV[{h}, {s}, {v}]")
-        print(f"Range: {self.lower_color} to {self.upper_color}")
+        print(f"Default Tracking Color: HSV[{h}, {s}, {v}]")
+        print(f"Default Range: {self.lower_color} to {self.upper_color}")
 
         self.prev_theta = 0.0
-        self.alpha = 0.2 
+        self.alpha = 0.2  # Smoothing factor for angle filtering
+        
+        # Store current frame for mouse callback
+        self.current_frame = None
         
         # On Pi, we might not have a display, so we print to terminal mostly
         # But we'll keep imshow for VNC/Desktop preview
         self.window_name = "Pi Pendulum Tracker"
+        
+        # Set up mouse callback for color picking
+        cv2.namedWindow(self.window_name)
+        cv2.setMouseCallback(self.window_name, self.mouse_callback)
+
+    def mouse_callback(self, event, x, y, flags, param):
+        """Left Click: Pick the color at the clicked position for tracking"""
+        if event == cv2.EVENT_LBUTTONDOWN:
+            if self.current_frame is None:
+                return
+            
+            # Convert the clicked point to HSV and extract color
+            hsv = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2HSV)
+            pixel = hsv[y, x]
+            h, s, v = pixel
+            
+            # Create a wide range to catch both pins (±20 Hue, ±60 Sat/Val)
+            self.lower_color = np.array([max(0, h-20), max(30, s-60), max(30, v-60)])
+            self.upper_color = np.array([min(179, h+20), min(255, s+60), min(255, v+60)])
+            
+            # Print the selected color for debugging
+            print(f"Color picked at ({x}, {y}): HSV[{h}, {s}, {v}]")
+            print(f"New Range: {self.lower_color} to {self.upper_color}")
 
     def get_frame(self):
         if HAS_PI_CAMERA:
@@ -53,12 +79,20 @@ class PendulumAngleEstimatorPi:
             return frame if ret else None
 
     def run(self):
-        print("--- RASPBERRY PI PENDULUM TRACKER ---")
-        print("Using hardcoded color. Press 'q' to quit.")
+        print("--- RASPBERRY PI PENDULUM TRACKER (INTERACTIVE MODE) ---")
+        print("Instructions:")
+        print("1. LEFT CLICK on one of the colored pins to set tracking color.")
+        print("2. The script will find the TWO largest matching blobs.")
+        print("3. Top blob = Pivot, Bottom blob = Bob.")
+        print("4. Press 'q' to quit.")
+        print()
         
         while True:
             frame = self.get_frame()
             if frame is None: break
+            
+            # Store frame for mouse callback
+            self.current_frame = frame
             
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
             mask = cv2.inRange(hsv, self.lower_color, self.upper_color)
@@ -114,6 +148,14 @@ class PendulumAngleEstimatorPi:
                     text = f"Angle: {theta_smooth:.2f}"
                     print(text) # Print to terminal for logging
                     cv2.putText(display, text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            
+            # Show mask preview in corner for debugging (optional but helpful)
+            mask_small = cv2.resize(mask, (160, 120))
+            display[0:120, 0:160] = cv2.cvtColor(mask_small, cv2.COLOR_GRAY2BGR)
+            
+            # Add instruction text at bottom
+            cv2.putText(display, "Left-click to pick color", (20, display.shape[0] - 20), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
             # Show
             cv2.imshow(self.window_name, display)
