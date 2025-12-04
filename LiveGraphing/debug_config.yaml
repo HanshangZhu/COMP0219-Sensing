@@ -1,0 +1,11 @@
+devices:
+  - name: Test Device
+    port: COM3
+    baud: 115200
+ui:
+  max_points: 3000
+  refresh_ms: 30
+  window_seconds: 15
+  max_speed: 1000
+  min_speed: -1
+
