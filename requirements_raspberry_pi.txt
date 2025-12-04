@@ -1,0 +1,127 @@
+# ============================================================
+# Raspberry Pi Python Dependencies for comp0219_cw2
+# Merged from conda environment 'comp0219' + Pi-specific packages
+# ============================================================
+# Setup Instructions:
+#   python3 -m venv venv
+#   source venv/bin/activate
+#   pip install -r requirements_raspberry_pi.txt
+# ============================================================
+
+# Core Computer Vision and Image Processing
+# ----------------------------------------------------------
+numpy==2.2.6                      # Numerical operations for all scripts (from conda env)
+opencv-python==4.12.0.88          # Main OpenCV library for camera and image processing (from conda env)
+opencv-contrib-python==4.12.0.88  # Additional OpenCV modules for calibration (from conda env)
+
+# Raspberry Pi Camera Support (Pi-specific)
+# ----------------------------------------------------------
+picamera2                         # Raspberry Pi camera library (Pi Camera v2/v3, HQ Camera)
+pidng                            # RAW DNG image format support
+piexif                           # EXIF metadata handling for images
+Pillow                           # Python Imaging Library for image manipulation
+simplejpeg                       # Fast JPEG encoding/decoding
+av                               # PyAV for video/audio processing
+
+# Serial Communication (UART)
+# ----------------------------------------------------------
+pyserial==3.5                     # Serial port communication with STM32/Arduino (from conda env)
+
+# GUI and Data Visualization (for LiveGraphing)
+# ----------------------------------------------------------
+PySide6==6.10.1                   # Qt6 framework for GUI applications (from conda env)
+PySide6-Essentials==6.10.1        # Qt6 essential modules (from conda env)
+PySide6-Addons==6.10.1            # Qt6 additional modules (from conda env)
+shiboken6==6.10.1                 # Python bindings generator for Qt (from conda env)
+pyqtgraph==0.14.0                 # Fast plotting library for real-time graphs (from conda env)
+
+# Configuration and Data Management
+# ----------------------------------------------------------
+PyYAML==6.0.3                     # YAML configuration file parsing (from conda env)
+jsonschema                        # JSON schema validation
+attrs                             # Classes without boilerplate
+pyrsistent                        # Persistent/immutable data structures
+
+# System and Video Device Support (Pi-specific)
+# ----------------------------------------------------------
+python-v4l2                       # Video4Linux2 bindings for camera control
+python-prctl                      # Process control for real-time scheduling
+
+# Utilities
+# ----------------------------------------------------------
+colorama==0.4.6                   # Cross-platform colored terminal text (from conda env)
+tqdm                              # Progress bars for long operations
+libarchive-c                      # Archive handling support
+
+# ============================================================
+# System Prerequisites (run these commands on Raspberry Pi)
+# ============================================================
+# sudo apt update && sudo apt upgrade -y
+# sudo apt install -y python3-pip python3-venv python3-dev
+# sudo apt install -y libcap-dev libatlas-base-dev
+# sudo apt install -y libhdf5-dev libhdf5-serial-dev
+# sudo apt install -y libjpeg-dev zlib1g-dev libfreetype6-dev
+# sudo apt install -y liblcms2-dev libopenjp2-7 libtiff5
+# sudo apt install -y libv4l-dev v4l-utils
+# sudo apt install -y libqt6-dev qt6-base-dev  # For PySide6
+#
+# ============================================================
+# Important Notes for Raspberry Pi Setup
+# ============================================================
+#
+# 1. CAMERA PERMISSIONS:
+#    sudo usermod -a -G video $USER
+#    sudo usermod -a -G gpio $USER
+#    (logout and login again)
+#
+# 2. SERIAL PORT PERMISSIONS:
+#    sudo usermod -a -G dialout $USER
+#    (logout and login again)
+#
+# 3. ENABLE UART (for CameraTest.py):
+#    Edit /boot/config.txt and add:
+#      enable_uart=1
+#      dtoverlay=disable-bt
+#    Then: sudo systemctl disable hciuart
+#    Reboot: sudo reboot
+#
+# 4. PICAMERA2 INSTALLATION:
+#    Option A (Recommended on Pi OS Bookworm):
+#      sudo apt install -y python3-picamera2
+#      # Then use system packages with: python3 -m venv --system-site-packages venv
+#    
+#    Option B (In venv, may require compilation):
+#      pip install picamera2
+#
+# 5. OPENCV INSTALLATION TIME:
+#    OpenCV compilation can take 20-40 minutes on Raspberry Pi.
+#    Consider using pre-built wheels or system packages:
+#      sudo apt install -y python3-opencv
+#      # Then create venv with: python3 -m venv --system-site-packages venv
+#
+# 6. REAL-TIME KERNEL (for RT_Kernel_Test_Scripts):
+#    Requires RT-PREEMPT kernel for real-time scheduling
+#    Install: sudo apt install -y linux-image-rt-arm64  # (if available)
+#
+# 7. MEMORY CONSIDERATIONS:
+#    Raspberry Pi 3: May struggle with heavy CV operations
+#    Raspberry Pi 4/5 (4GB+): Recommended for this project
+#
+# 8. VERIFY INSTALLATIONS:
+#    python3 -c "import cv2; print(cv2.__version__)"
+#    python3 -c "import numpy; print(numpy.__version__)"
+#    python3 -c "import serial; print(serial.VERSION)"
+#
+# ============================================================
+# Script-to-Dependency Mapping
+# ============================================================
+# CameraTest.py                -> pyserial
+# pendulum_angle.py            -> opencv-python, numpy
+# pi_pendulum_angle.py         -> picamera2, opencv-python, numpy
+# LiveGraphing/Testing_*.py    -> PySide6, pyqtgraph, pyserial, PyYAML
+# Week_7_Calibration_Tutorial  -> opencv-python, opencv-contrib-python, numpy
+# Week_8_Segmentation_Tutorial -> opencv-python, numpy, [picamera2]
+# Week_9_Line_Fitting_Tutorial -> opencv-python, numpy, [picamera2]
+# RT_Kernel_Test_Scripts       -> pyserial, python-prctl
+# ============================================================
+
