@@ -77,15 +77,26 @@ class PendulumAngleEstimatorPi:
         # Initialize Camera
         if HAS_PI_CAMERA:
             self.picam2 = Picamera2()
-            # Configure for 640x480 @ 30fps for good performance
-            config = self.picam2.create_preview_configuration(main={"format": "RGB888", "size": (640, 480)})
+            # Configure for 640x480 @ 60fps for better temporal resolution
+            config = self.picam2.create_preview_configuration(
+                main={"format": "RGB888", "size": (640, 480)},
+                controls={"FrameDurationLimits": (16666, 16666)}  # ~60 FPS
+            )
             self.picam2.configure(config)
             self.picam2.start()
-            print("PiCamera2 started.")
+            try:
+                self.picam2.set_controls({"FrameDurationLimits": (16666, 16666)})
+            except Exception as e:
+                print(f"Warning: Could not enforce 60 FPS controls: {e}")
+            print("PiCamera2 started at target 60 FPS.")
         else:
             self.cap = cv2.VideoCapture(0)
             if not self.cap.isOpened():
                 raise ValueError("Could not open webcam.")
+            try:
+                self.cap.set(cv2.CAP_PROP_FPS, 60)
+            except Exception:
+                pass
 
         # Default color range (Green-ish) - can be changed by clicking
         # Default Target: [100, 104, 149]
