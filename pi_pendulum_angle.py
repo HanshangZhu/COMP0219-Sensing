@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import time
+import argparse
+import math
 
 # --- RASPBERRY PI CAMERA SETUP ---
 try:
@@ -12,7 +14,14 @@ except ImportError:
     HAS_PI_CAMERA = False
 
 class PendulumAngleEstimatorPi:
-    def __init__(self):
+    def __init__(self, output_mode='speed', calibration_constant=1.0):
+        """
+        Initialize the pendulum angle estimator.
+        
+        Args:
+            output_mode: 'angle' to print angle, 'speed' to print wind speed (default)
+            calibration_constant: C value for wind speed calculation V = C * sqrt(tan(angle))
+        """
         # Initialize Camera
         if HAS_PI_CAMERA:
             self.picam2 = Picamera2()
@@ -38,6 +47,10 @@ class PendulumAngleEstimatorPi:
 
         self.prev_theta = 0.0
         self.alpha = 0.2  # Smoothing factor for angle filtering
+        
+        # Output mode and calibration constant
+        self.output_mode = output_mode  # 'angle' or 'speed'
+        self.calibration_constant = calibration_constant  # C in formula V = C * sqrt(tan(angle))
         
         # Store current frame for mouse callback
         self.current_frame = None
@@ -78,6 +91,36 @@ class PendulumAngleEstimatorPi:
             ret, frame = self.cap.read()
             return frame if ret else None
 
+    def calculate_wind_speed(self, angle_deg):
+        """
+        Calculate wind speed from pendulum angle using V = C * sqrt(tan(angle))
+        
+        Args:
+            angle_deg: Pendulum angle in degrees
+            
+        Returns:
+            Wind speed in m/s, or 0 if calculation is invalid
+        """
+        try:
+            # Convert angle to radians
+            angle_rad = math.radians(abs(angle_deg))
+            
+            # Avoid division by zero and negative values under sqrt
+            if angle_rad < 0.001:  # Angle too small (< ~0.06 degrees)
+                return 0.0
+            
+            # Calculate V = C * sqrt(tan(angle))
+            tan_angle = math.tan(angle_rad)
+            
+            if tan_angle < 0:
+                return 0.0
+            
+            wind_speed = self.calibration_constant * math.sqrt(tan_angle)
+            return wind_speed
+            
+        except (ValueError, ZeroDivisionError):
+            return 0.0
+    
     def run(self):
         print("--- RASPBERRY PI PENDULUM TRACKER (INTERACTIVE MODE) ---")
         print("Instructions:")
@@ -85,6 +128,9 @@ class PendulumAngleEstimatorPi:
         print("2. The script will find the TWO largest matching blobs.")
         print("3. Top blob = Pivot, Bottom blob = Bob.")
         print("4. Press 'q' to quit.")
+        print(f"Output Mode: {'ANGLE' if self.output_mode == 'angle' else 'WIND SPEED'}")
+        if self.output_mode == 'speed':
+            print(f"Calibration Constant C: {self.calibration_constant}")
         print()
         
         while True:
@@ -144,10 +190,19 @@ class PendulumAngleEstimatorPi:
                     theta_smooth = (self.alpha * theta_deg) + ((1 - self.alpha) * self.prev_theta)
                     self.prev_theta = theta_smooth
                     
-                    # Output
-                    text = f"Angle: {theta_smooth:.2f}"
-                    print(text) # Print to terminal for logging
-                    cv2.putText(display, text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                    # Output based on mode
+                    if self.output_mode == 'angle':
+                        # Print angle in format: angle:xx.x
+                        print(f"angle:{theta_smooth:.1f}")
+                        display_text = f"Angle: {theta_smooth:.1f} deg"
+                    else:
+                        # Calculate and print wind speed (just the number)
+                        wind_speed = self.calculate_wind_speed(theta_smooth)
+                        print(f"{wind_speed:.1f}")
+                        display_text = f"Speed: {wind_speed:.1f} m/s (Angle: {theta_smooth:.1f})"
+                    
+                    # Display on screen
+                    cv2.putText(display, display_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
             
             # Show mask preview in corner for debugging (optional but helpful)
             mask_small = cv2.resize(mask, (160, 120))
@@ -169,5 +224,20 @@ class PendulumAngleEstimatorPi:
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    PendulumAngleEstimatorPi().run()
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Pendulum Angle Tracker with Wind Speed Estimation')
+    parser.add_argument('--angle', action='store_true', 
+                       help='Output angle instead of wind speed (format: angle:xx.x)')
+    parser.add_argument('-C', '--calibration', type=float, default=1.0,
+                       help='Calibration constant C for wind speed formula V = C * sqrt(tan(angle)) (default: 1.0)')
+    
+    args = parser.parse_args()
+    
+    # Determine output mode
+    output_mode = 'angle' if args.angle else 'speed'
+    
+    # Create and run the estimator
+    estimator = PendulumAngleEstimatorPi(output_mode=output_mode, 
+                                         calibration_constant=args.calibration)
+    estimator.run()
 
