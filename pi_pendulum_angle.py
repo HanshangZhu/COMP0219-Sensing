@@ -324,8 +324,8 @@ if __name__ == "__main__":
                        help='Calibration constant C for wind speed formula V = C * sqrt(tan(angle)) (default: 1.0)')
     parser.add_argument('--fast', action='store_true',
                        help='Enable fast motion mode (wider color tolerance, reduced blur, lower thresholds)')
-    parser.add_argument('--serial', type=str, default=None,
-                       help='Serial port for UART output (e.g., /dev/ttyAMA0). Disabled by default.')
+    parser.add_argument('--serial', type=str, default='/dev/ttyAMA0',
+                       help='Serial port for UART output (default: /dev/ttyAMA0). Use "none" to disable.')
     parser.add_argument('--baud', type=int, default=115200,
                        help='Serial baud rate (default: 115200)')
     
@@ -334,11 +334,14 @@ if __name__ == "__main__":
     # Determine output mode
     output_mode = 'angle' if args.angle else 'speed'
     
+    # Handle "none" as no serial port
+    serial_port = None if args.serial.lower() == 'none' else args.serial
+    
     # Create and run the estimator
     estimator = PendulumAngleEstimatorPi(output_mode=output_mode, 
                                          calibration_constant=args.calibration,
                                          fast_motion=args.fast,
-                                         serial_port=args.serial,
+                                         serial_port=serial_port,
                                          serial_baud=args.baud)
     estimator.run()
 
