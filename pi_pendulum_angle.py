@@ -4,6 +4,8 @@ import time
 import argparse
 import math
 import serial
+import json
+from pathlib import Path
 
 # --- RASPBERRY PI CAMERA SETUP ---
 try:
@@ -13,6 +15,32 @@ except ImportError:
     print("Warning: picamera2 not found. This script is intended for Raspberry Pi.")
     print("Falling back to cv2.VideoCapture(0) for testing on PC...")
     HAS_PI_CAMERA = False
+
+# --- CALIBRATION FILE ---
+CALIBRATION_FILE = "pendulum_calibration.json"
+
+def load_calibration_constant():
+    """
+    Load calibration constant from file.
+    
+    Returns:
+        Calibration constant C, or 1.0 if file doesn't exist
+    """
+    try:
+        with open(CALIBRATION_FILE, 'r') as f:
+            data = json.load(f)
+        C = data.get("calibration_constant", 1.0)
+        print(f"Loaded calibration constant: C = {C:.6f} from {CALIBRATION_FILE}")
+        return C
+    except FileNotFoundError:
+        print(f"No calibration file found ({CALIBRATION_FILE}), using default C = 1.0")
+        return 1.0
+    except json.JSONDecodeError:
+        print(f"Warning: {CALIBRATION_FILE} is corrupted, using default C = 1.0")
+        return 1.0
+    except Exception as e:
+        print(f"Warning: Could not load calibration: {e}, using default C = 1.0")
+        return 1.0
 
 class PendulumAngleEstimatorPi:
     def __init__(self, output_mode='speed', calibration_constant=1.0, fast_motion=False, 
@@ -61,14 +89,14 @@ class PendulumAngleEstimatorPi:
 
         # Default color range (Green-ish) - can be changed by clicking
         # Default Target: [100, 104, 149]
-        # For fast motion: slightly wider tolerance and less filtering
+        # For fast motion: minimal adjustments - prioritize reducing noise over handling extreme blur
         if fast_motion:
-            self.hue_tolerance = 25      # ±25 instead of ±20 (moderate increase)
-            self.sat_tolerance = 70      # ±70 instead of ±60 (moderate increase)
-            self.val_tolerance = 70      # ±70 instead of ±60 (moderate increase)
-            self.min_area = 30           # Lower threshold (was 50, not too low)
-            self.erode_iterations = 0    # Skip erosion to preserve blurred objects
-            self.dilate_iterations = 2   # Same as normal
+            self.hue_tolerance = 22      # ±22 instead of ±20 (small increase for blur)
+            self.sat_tolerance = 65      # ±65 instead of ±60 (small increase)
+            self.val_tolerance = 65      # ±65 to handle brightness shifts
+            self.min_area = 45           # Slightly lower (was 50)
+            self.erode_iterations = 1    # Keep erosion to filter noise
+            self.dilate_iterations = 3   # Slightly more dilation to reconnect blurred pixels
         else:
             self.hue_tolerance = 20
             self.sat_tolerance = 60
@@ -320,8 +348,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Pendulum Angle Tracker with Wind Speed Estimation and UART Output')
     parser.add_argument('--angle', action='store_true', 
                        help='Output angle instead of wind speed (format: angle:xx.x)')
-    parser.add_argument('-C', '--calibration', type=float, default=1.0,
-                       help='Calibration constant C for wind speed formula V = C * sqrt(tan(angle)) (default: 1.0)')
+    parser.add_argument('-C', '--calibration', type=float, default=None,
+                       help='Calibration constant C for wind speed formula V = C * sqrt(tan(angle)) (default: load from file or 1.0)')
     parser.add_argument('--fast', action='store_true',
                        help='Enable fast motion mode (wider color tolerance, reduced blur, lower thresholds)')
     parser.add_argument('--serial', type=str, default='/dev/ttyAMA0',
@@ -331,6 +359,14 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    # Determine calibration constant
+    # Priority: command-line argument > calibration file > default 1.0
+    if args.calibration is not None:
+        calibration_constant = args.calibration
+        print(f"Using calibration constant from command line: C = {calibration_constant:.6f}")
+    else:
+        calibration_constant = load_calibration_constant()
+    
     # Determine output mode
     output_mode = 'angle' if args.angle else 'speed'
     
@@ -339,7 +375,7 @@ if __name__ == "__main__":
     
     # Create and run the estimator
     estimator = PendulumAngleEstimatorPi(output_mode=output_mode, 
-                                         calibration_constant=args.calibration,
+                                         calibration_constant=calibration_constant,
                                          fast_motion=args.fast,
                                          serial_port=serial_port,
                                          serial_baud=args.baud)
