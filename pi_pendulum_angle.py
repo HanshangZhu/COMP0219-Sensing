@@ -31,12 +31,6 @@ class PendulumAngleEstimatorPi:
             self.picam2 = Picamera2()
             # Configure for 640x480 @ 30fps for good performance
             config = self.picam2.create_preview_configuration(main={"format": "RGB888", "size": (640, 480)})
-            
-            # For fast motion: reduce exposure time to minimize blur
-            if fast_motion:
-                config["controls"] = {"ExposureTime": 5000, "AnalogueGain": 2.0}  # 5ms exposure
-                print("Fast motion mode enabled: reduced exposure time")
-            
             self.picam2.configure(config)
             self.picam2.start()
             print("PiCamera2 started.")
@@ -44,21 +38,17 @@ class PendulumAngleEstimatorPi:
             self.cap = cv2.VideoCapture(0)
             if not self.cap.isOpened():
                 raise ValueError("Could not open webcam.")
-            
-            # For fast motion: set higher FPS if possible
-            if fast_motion:
-                self.cap.set(cv2.CAP_PROP_FPS, 60)
 
         # Default color range (Green-ish) - can be changed by clicking
         # Default Target: [100, 104, 149]
-        # For fast motion: wider tolerance to handle blur and lighting changes
+        # For fast motion: slightly wider tolerance and less filtering
         if fast_motion:
-            self.hue_tolerance = 30      # ±30 instead of ±20
-            self.sat_tolerance = 80      # ±80 instead of ±60
-            self.val_tolerance = 80      # ±80 instead of ±60
-            self.min_area = 20           # Lower threshold (was 50)
+            self.hue_tolerance = 25      # ±25 instead of ±20 (moderate increase)
+            self.sat_tolerance = 70      # ±70 instead of ±60 (moderate increase)
+            self.val_tolerance = 70      # ±70 instead of ±60 (moderate increase)
+            self.min_area = 30           # Lower threshold (was 50, not too low)
             self.erode_iterations = 0    # Skip erosion to preserve blurred objects
-            self.dilate_iterations = 1   # Minimal dilation
+            self.dilate_iterations = 2   # Same as normal
         else:
             self.hue_tolerance = 20
             self.sat_tolerance = 60
