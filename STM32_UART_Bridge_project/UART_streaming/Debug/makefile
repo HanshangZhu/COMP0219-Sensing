@@ -60,8 +60,8 @@ all: main-build
 main-build: UART_streaming.elf secondary-outputs
 
 # Tool invocations
-UART_streaming.elf UART_streaming.map: $(OBJS) $(USER_OBJS) /Users/wterry/STM32CubeIDE/ProjectSpace/UART_streaming/STM32F411RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "UART_streaming.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/wterry/STM32CubeIDE/ProjectSpace/UART_streaming/STM32F411RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="UART_streaming.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+UART_streaming.elf UART_streaming.map: $(OBJS) $(USER_OBJS) C:\Users\HZ\OneDrive\Desktop\Year3\Sensing\comp0219_cw2\STM32_UART_Bridge_project\UART_streaming\STM32F411RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "UART_streaming.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\HZ\OneDrive\Desktop\Year3\Sensing\comp0219_cw2\STM32_UART_Bridge_project\UART_streaming\STM32F411RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="UART_streaming.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

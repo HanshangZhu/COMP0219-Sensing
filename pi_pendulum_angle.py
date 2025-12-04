@@ -39,8 +39,8 @@ class PendulumAngleEstimatorPi:
         # Default Target: [100, 104, 149]
         # Range:  +/- 20 Hue, +/- 60 Sat/Val
         h, s, v = 100, 104, 149
-        self.lower_color = np.array([max(0, h-20), max(30, s-60), max(30, v-60)])
-        self.upper_color = np.array([min(179, h+20), min(255, s+60), min(255, v+60)])
+        self.lower_color = np.array([max(0, h-20), max(30, s-60), max(30, v-60)], dtype=np.uint8)
+        self.upper_color = np.array([min(179, h+20), min(255, s+60), min(255, v+60)], dtype=np.uint8)
         
         print(f"Default Tracking Color: HSV[{h}, {s}, {v}]")
         print(f"Default Range: {self.lower_color} to {self.upper_color}")
@@ -69,18 +69,22 @@ class PendulumAngleEstimatorPi:
             if self.current_frame is None:
                 return
             
-            # Convert the clicked point to HSV and extract color
-            hsv = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2HSV)
-            pixel = hsv[y, x]
-            h, s, v = pixel
-            
-            # Create a wide range to catch both pins (±20 Hue, ±60 Sat/Val)
-            self.lower_color = np.array([max(0, h-20), max(30, s-60), max(30, v-60)])
-            self.upper_color = np.array([min(179, h+20), min(255, s+60), min(255, v+60)])
-            
-            # Print the selected color for debugging
-            print(f"Color picked at ({x}, {y}): HSV[{h}, {s}, {v}]")
-            print(f"New Range: {self.lower_color} to {self.upper_color}")
+            try:
+                # Convert the clicked point to HSV and extract color
+                hsv = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2HSV)
+                pixel = hsv[y, x]
+                h, s, v = int(pixel[0]), int(pixel[1]), int(pixel[2])  # Explicitly convert to int
+                
+                # Create a wide range to catch both pins (±20 Hue, ±60 Sat/Val)
+                # Explicitly cast to uint8 to match OpenCV's expected type
+                self.lower_color = np.array([max(0, h-20), max(30, s-60), max(30, v-60)], dtype=np.uint8)
+                self.upper_color = np.array([min(179, h+20), min(255, s+60), min(255, v+60)], dtype=np.uint8)
+                
+                # Print the selected color for debugging
+                print(f"Color picked at ({x}, {y}): HSV[{h}, {s}, {v}]")
+                print(f"New Range: {self.lower_color} to {self.upper_color}")
+            except Exception as e:
+                print(f"Error in mouse callback: {e}")
 
     def get_frame(self):
         if HAS_PI_CAMERA:
