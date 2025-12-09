@@ -19,32 +19,68 @@ except ImportError:
 # --- CALIBRATION FILE ---
 CALIBRATION_FILE = "pendulum_calibration.json"
 
-def load_calibration_constant():
+def load_calibration(model_choice="auto", fallback_C=1.0):
     """
-    Load calibration constant from file.
-    
+    Load calibration models from file.
+
+    Args:
+        model_choice: 'auto', 'single', or 'double'
+        fallback_C: default C if nothing is found
+
     Returns:
-        Calibration constant C, or 1.0 if file doesn't exist
+        (selected_model, single_params, double_params_or_None)
     """
+    single_params = {"C": fallback_C}
+    double_params = None
+    recommended = None
+
     try:
         with open(CALIBRATION_FILE, 'r') as f:
-            data = json.load(f)
-        C = data.get("calibration_constant", 1.0)
-        print(f"Loaded calibration constant: C = {C:.6f} from {CALIBRATION_FILE}")
-        return C
+            data = json.load(f) or {}
+        models = data.get("models", {}) or {}
+        recommended = data.get("recommended_model")
+
+        # Single model
+        if "single" in models and "C" in models["single"]:
+            single_params["C"] = float(models["single"]["C"])
+        else:
+            # Backward compatibility with calibration_constant
+            single_params["C"] = float(data.get("calibration_constant", fallback_C))
+
+        # Double model (optional)
+        if "double" in models and "A" in models["double"] and "p" in models["double"]:
+            try:
+                A = float(models["double"]["A"])
+                p = float(models["double"]["p"])
+                double_params = {"A": A, "p": p}
+            except Exception:
+                double_params = None
+
     except FileNotFoundError:
-        print(f"No calibration file found ({CALIBRATION_FILE}), using default C = 1.0")
-        return 1.0
+        print(f"No calibration file found ({CALIBRATION_FILE}), using default C = {fallback_C}")
     except json.JSONDecodeError:
-        print(f"Warning: {CALIBRATION_FILE} is corrupted, using default C = 1.0")
-        return 1.0
+        print(f"Warning: {CALIBRATION_FILE} is corrupted, using default C = {fallback_C}")
     except Exception as e:
-        print(f"Warning: Could not load calibration: {e}, using default C = 1.0")
-        return 1.0
+        print(f"Warning: Could not load calibration: {e}, using default C = {fallback_C}")
+
+    # Decide selected model
+    selected = model_choice
+    if model_choice == "auto":
+        if recommended in ("single", "double"):
+            selected = recommended
+        elif double_params is not None:
+            selected = "double"
+        else:
+            selected = "single"
+    elif model_choice == "double" and double_params is None:
+        print("Requested double model, but no double parameters found. Falling back to single.")
+        selected = "single"
+
+    return selected, single_params, double_params
 
 class PendulumAngleEstimatorPi:
     def __init__(self, output_mode='speed', calibration_constant=1.0, fast_motion=False, 
-                 serial_port=None, serial_baud=115200):
+                 serial_port=None, serial_baud=115200, model_choice='auto'):
         """
         Initialize the pendulum angle estimator.
         
@@ -54,9 +90,19 @@ class PendulumAngleEstimatorPi:
             fast_motion: Enable optimizations for fast-moving objects (default: False)
             serial_port: Serial port for UART output (e.g., '/dev/ttyAMA0'), None to disable
             serial_baud: Serial baud rate (default: 115200)
+            model_choice: 'auto', 'single', or 'double' (default: auto)
         """
         # Store fast motion mode
         self.fast_motion = fast_motion
+        self.model_choice = model_choice
+        
+        # Load calibration models (single and optional double)
+        self.selected_model, self.single_params, self.double_params = load_calibration(
+            model_choice=model_choice,
+            fallback_C=calibration_constant
+        )
+        # Preserve single-parameter constant for backward compatibility/output
+        self.calibration_constant = float(self.single_params.get("C", calibration_constant))
         
         # Initialize Serial/UART (optional)
         self.serial_port = None
@@ -130,9 +176,11 @@ class PendulumAngleEstimatorPi:
         self.prev_theta = 0.0
         self.alpha = 0.2  # Smoothing factor for angle filtering
         
-        # Output mode and calibration constant
+        # Output mode and calibration constants/models
         self.output_mode = output_mode  # 'angle' or 'speed'
-        self.calibration_constant = calibration_constant  # C in formula V = C * sqrt(tan(angle))
+        # selected_model: 'single' or 'double'
+        # single_params: {"C": ...}
+        # double_params: {"A": ..., "p": ...} or None
         
         # Store current frame for mouse callback
         self.current_frame = None
@@ -203,7 +251,7 @@ class PendulumAngleEstimatorPi:
     
     def calculate_wind_speed(self, angle_deg):
         """
-        Calculate wind speed from pendulum angle using V = C * sqrt(tan(angle))
+        Calculate wind speed from pendulum angle using the selected model.
         
         Args:
             angle_deg: Pendulum angle in degrees
@@ -219,14 +267,21 @@ class PendulumAngleEstimatorPi:
             if angle_rad < 0.001:  # Angle too small (< ~0.06 degrees)
                 return 0.0
             
-            # Calculate V = C * sqrt(tan(angle))
             tan_angle = math.tan(angle_rad)
             
             if tan_angle < 0:
                 return 0.0
-            
-            wind_speed = self.calibration_constant * math.sqrt(tan_angle)
-            return wind_speed
+
+            # Model selection
+            if self.selected_model == "double" and self.double_params is not None:
+                A = float(self.double_params.get("A", 0.0))
+                p = float(self.double_params.get("p", 0.5))
+                wind_speed = A * (tan_angle ** p)
+                return wind_speed
+            else:
+                # Single-parameter fallback
+                wind_speed = self.calibration_constant * math.sqrt(tan_angle)
+                return wind_speed
             
         except (ValueError, ZeroDivisionError):
             return 0.0
@@ -360,35 +415,28 @@ if __name__ == "__main__":
     parser.add_argument('--angle', action='store_true', 
                        help='Output angle instead of wind speed (format: angle:xx.x)')
     parser.add_argument('-C', '--calibration', type=float, default=None,
-                       help='Calibration constant C for wind speed formula V = C * sqrt(tan(angle)) (default: load from file or 1.0)')
+                       help='Calibration constant C for wind speed formula V = C * sqrt(tan(angle)) (fallback if file missing)')
     parser.add_argument('--fast', action='store_true',
                        help='Enable fast motion mode (wider color tolerance, reduced blur, lower thresholds)')
     parser.add_argument('--serial', type=str, default='/dev/ttyAMA0',
                        help='Serial port for UART output (default: /dev/ttyAMA0). Use "none" to disable.')
     parser.add_argument('--baud', type=int, default=115200,
                        help='Serial baud rate (default: 115200)')
+    parser.add_argument('--model', type=str, choices=['auto', 'single', 'double'], default='auto',
+                       help="Model choice for calibration: 'auto' (use recommended), 'single', or 'double'")
     
     args = parser.parse_args()
     
-    # Determine calibration constant
-    # Priority: command-line argument > calibration file > default 1.0
-    if args.calibration is not None:
-        calibration_constant = args.calibration
-        print(f"Using calibration constant from command line: C = {calibration_constant:.6f}")
-    else:
-        calibration_constant = load_calibration_constant()
-    
-    # Determine output mode
+    # Determine calibration constant fallback
+    calibration_constant = args.calibration if args.calibration is not None else 1.0
     output_mode = 'angle' if args.angle else 'speed'
-    
-    # Handle "none" as no serial port
     serial_port = None if args.serial.lower() == 'none' else args.serial
     
-    # Create and run the estimator
     estimator = PendulumAngleEstimatorPi(output_mode=output_mode, 
                                          calibration_constant=calibration_constant,
                                          fast_motion=args.fast,
                                          serial_port=serial_port,
-                                         serial_baud=args.baud)
+                                         serial_baud=args.baud,
+                                         model_choice=args.model)
     estimator.run()
 
