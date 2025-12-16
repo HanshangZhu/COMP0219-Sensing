@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+__MACOSX/
+
+# Data files (large CSV files, collected data)
+Demo_Collected_Data/
+*.csv
+calibration_data.npz
+
+# Weekly tutorials and labs (course materials)
+Week_7_Calibration_Tutorial/
+Week_7_Lab/
+Week_8_Segmentation_Tutorial/
+Week_9_Line_Fitting_Tutorial/
+
+# Report files (private)
+report/
+
+# STM32 project (separate repo / course-provided)
+STM32_UART_Bridge_project/
+UART_streaming/
+
+# RT Kernel test scripts (development/testing only)
+RT_Kernel_Test_Scripts/
+
+# Build artifacts
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+Debug/
+Release/
+
+# Temporary files
+*.log
+*.tmp
